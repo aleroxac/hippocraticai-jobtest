@@ -1,0 +1,82 @@
+name: ci
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.image-tag-gen.outputs.image_tag }}
+      env_name: ${{ steps.set-env.outputs.env_name }}
+
+    steps:
+      ## --- setup
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      ## --- test
+      - name: test
+        run: |
+          pip install -r src/requirements-dev.txt
+          pytest -v
+
+      ## --- build
+      - name: GCP Auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configure Docker auth for GCR
+        run: gcloud auth configure-docker gcr.io --quiet
+
+      - name: Set environment name
+        id: set-env
+        run: |
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+            echo "env_name=dev" >> $GITHUB_OUTPUT
+          else
+            echo "env_name=hml" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate Image Tag
+        id: image-tag-gen
+        run: |
+          IMAGE_TAG="${{ steps.set-env.outputs.env_name }}-$(date +'%Y%m%d%H%M')"
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Build and Push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./src
+          file: ./src/Dockerfile
+          push: true
+          tags: gcr.io/aleroxac/hippocraticai-api:${{ steps.image-tag-gen.outputs.image_tag }}
+          build-args: |
+            API_HOST=0.0.0.0
+            API_PORT=8000
+
+  trigger-cd:
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call CD workflow
+        uses: benc-uk/workflow-dispatch@v1
+        with:
+          workflow: cd
+          token: ${{ secrets.GITHUB_TOKEN }}
+          inputs: |
+            {
+              "ENV": "${{ needs.ci.outputs.env_name }}",
+              "IMAGE_TAG": "${{ needs.ci.outputs.image_tag }}"
+            }

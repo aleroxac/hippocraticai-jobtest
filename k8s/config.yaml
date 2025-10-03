@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hippocraticai-api-config
+  namespace: hippocraticai
+data:
+  API_HOST: "0.0.0.0"
+  API_PORT: "8000"
+  VISITOR_NAME: "Omid"

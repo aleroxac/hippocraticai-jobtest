@@ -1,0 +1,93 @@
+name: cd
+
+on:
+  workflow_dispatch:
+    inputs:
+      ENV:
+        description: "Environment (dev|hml|prd)"
+        required: true
+      IMAGE_TAG:
+        description: "Image tag to deploy"
+        required: true
+
+jobs:
+  cd:
+    runs-on: ubuntu-latest
+
+    env:
+      IMAGE_TAG: ${{ github.event.inputs.IMAGE_TAG }}
+      ENV: ${{ github.event.inputs.ENV }}
+
+    steps:
+      ## --- setup
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: GCP Auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          # Adiciona chave GPG atualizada
+          curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor | sudo tee /usr/share/keyrings/cloud.google.gpg >/dev/null
+
+          # Adiciona repo do Cloud SDK
+          echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
+
+          sudo apt-get update -y
+          sudo apt-get install -y google-cloud-sdk-gke-gcloud-auth-plugin
+        env:
+          CLOUDSDK_CORE_DISABLE_PROMPTS: 1
+
+      - name: Enable gke-gcloud-auth-plugin
+        run: echo "USE_GKE_GCLOUD_AUTH_PLUGIN=True" >> $GITHUB_ENV
+
+      - name: Get GKE credentials
+        run: |
+          if [ "${ENV}" = "prd" ]; then
+            gcloud container clusters get-credentials hippocraticai-prd --region us-east1
+          elif [ "${ENV}" = "dev" ]; then
+            gcloud container clusters get-credentials hippocraticai-dev --region us-east1
+          else
+            gcloud container clusters get-credentials hippocraticai-hml --region us-east1
+          fi
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+
+      ## --- deploy
+      - name: Deploy with Helm
+        run: |
+          cd k8s
+          kubectl apply -f <(kubectl create ns hippocraticai --dry-run=client -o yaml)
+          kubectl apply -f config.yaml
+
+          helm upgrade --install hippocraticai-api helmchart \
+            --create-namespace=true \
+            --namespace=hippocraticai \
+            -f values.yaml \
+            --set image.repository=gcr.io/aleroxac/hippocraticai-api \
+            --set image.tag=${IMAGE_TAG}
+
+      - name: Wait for Pods Ready
+        run: |
+          kubectl wait \
+            --timeout=180s \
+            --for=condition=ready \
+            --namespace=hippocraticai \
+            -l app.kubernetes.io/name=hippocraticai-api pods
+
+      - name: Smoke Test
+        run: |
+          LB_IP=$(
+            kubectl get svc/hippocraticai-api \
+              -o jsonpath="{.status.loadBalancer.ingress[0].ip}" \
+              --namespace=hippocraticai
+          )
+          echo "LoadBalancer IP: ${LB_IP}"
+          curl -s ${LB_IP}:8000/health
+          curl -s ${LB_IP}:8000/hello

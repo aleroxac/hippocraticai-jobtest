@@ -1,0 +1,51 @@
+nameOverride: ""
+fullnameOverride: ""
+
+## --- deployment
+imagePullSecrets: []
+podAnnotations: {}
+podSecurityContext: {}
+securityContext: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+image:
+  repository: aleroxac
+  pullPolicy: Always
+  tag: ""
+resources: {}
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+livenessProbe: 
+  httpGet:
+    path: /health
+    port: http
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+environment: {}
+
+## --- hpa
+replicaCount: 1
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 80
+behavior: {}
+
+## --- service
+service:
+  type: LoadBalancer
+  port: 8000

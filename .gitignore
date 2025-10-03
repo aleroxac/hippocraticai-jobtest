@@ -1,0 +1,22 @@
+## python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv
+venv/
+build/
+dist/
+.git/
+
+## terraform
+**/.terraform.lock.hcl
+**/.terraform
+**/terraform.tfstate
+**/terraform.tfstate.backup
+
+## others
+.env
+TODO.md
+SETUP.md
