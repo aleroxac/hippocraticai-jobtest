@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ENV:
-        description: "Environment (dev|hml|prd)"
+        description: "Environment (dev|stg|prd)"
         required: true
       IMAGE_TAG:
         description: "Image tag to deploy"
@@ -15,20 +15,30 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
+      APP_NAME: hippocraticai-api
+      NAMESPACE: hippocraticai
+      GKE_CLUSTER_NAME_PREFIX: hippocraticai
       IMAGE_TAG: ${{ github.event.inputs.IMAGE_TAG }}
       ENV: ${{ github.event.inputs.ENV }}
+      WAIT_TIMEOUT: 180
+      WAIT_INTERVAL: 10
+      APP_PORT: 8000
+      APP_HEALTHCHECK_PATH: "/health"
 
     steps:
       ## --- setup
-      - name: Checkout
+      - name: checkout
+        id: checkout
         uses: actions/checkout@v4
 
-      - name: GCP Auth
+      - name: gcp-auth
+        id: gcp-auth
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Install gke-gcloud-auth-plugin
+      - name: install-gke-gcloud-auth-plugin
+        id: install-gke-gcloud-auth-plugin
         run: |
           # Adiciona chave GPG atualizada
           curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor | sudo tee /usr/share/keyrings/cloud.google.gpg >/dev/null
@@ -41,53 +51,80 @@ jobs:
         env:
           CLOUDSDK_CORE_DISABLE_PROMPTS: 1
 
-      - name: Enable gke-gcloud-auth-plugin
+      - name: enable-gke-gcloud-auth-plugin
+        id: enable-gke-gcloud-auth-plugin
         run: echo "USE_GKE_GCLOUD_AUTH_PLUGIN=True" >> $GITHUB_ENV
 
-      - name: Get GKE credentials
-        run: |
-          if [ "${ENV}" = "prd" ]; then
-            gcloud container clusters get-credentials hippocraticai-prd --region us-east1
-          elif [ "${ENV}" = "dev" ]; then
-            gcloud container clusters get-credentials hippocraticai-dev --region us-east1
-          else
-            gcloud container clusters get-credentials hippocraticai-hml --region us-east1
-          fi
+      - name: get-gke-credentials
+        id: get-gke-credentials
+        run: gcloud container clusters get-credentials "${GKE_CLUSTER_NAME_PREFIX}-${ENV}" --region us-east1
 
-      - name: Set up Helm
+      - name: setup-helm
+        id: setup-helm
         uses: azure/setup-helm@v4
         with:
           version: v3.14.4
 
+
+
       ## --- deploy
-      - name: Deploy with Helm
+      - name: deploy-helmchart
+        id: deploy-helmchart
         run: |
           cd k8s
-          kubectl apply -f <(kubectl create ns hippocraticai --dry-run=client -o yaml)
+          kubectl apply -f <(kubectl create ns "${NAMESPACE}" --dry-run=client -o yaml)
           kubectl apply -f config.yaml
 
-          helm upgrade --install hippocraticai-api helmchart \
+          helm upgrade --install "${APP_NAME}" helmchart \
             --create-namespace=true \
-            --namespace=hippocraticai \
+            --namespace="${NAMESPACE}" \
             -f values.yaml \
-            --set image.repository=gcr.io/aleroxac/hippocraticai-api \
+            --set image.repository=gcr.io/aleroxac/${APP_NAME} \
             --set image.tag=${IMAGE_TAG}
 
-      - name: Wait for Pods Ready
+      - name: wait-for-pods
+        id: wait-for-pods
         run: |
           kubectl wait \
-            --timeout=180s \
+            --timeout="${WAIT_TIMEOUT}s" \
             --for=condition=ready \
-            --namespace=hippocraticai \
-            -l app.kubernetes.io/name=hippocraticai-api pods
+            --namespace="${NAMESPACE}" \
+            -l app.kubernetes.io/name="${APP_NAME}" pods
 
-      - name: Smoke Test
+      - name: wait-for-svc
+        id: wait-for-svc
+        run: |
+          echo "Waiting for LoadBalancer external IP for service: ${APP_NAME}"
+          for i in $(seq 1 $((WAIT_TIMEOUT / WAIT_INTERVAL))); do
+            EXTERNAL_IP=$(
+              kubectl get svc "${APP_NAME}" \
+                -n "${NAMESPACE}" \
+                -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+            )
+            if [ -z "${EXTERNAL_IP}" ]; then
+              echo "[$(date +%H:%M:%S)] External IP not assigned yet... waiting ${WAIT_INTERVAL} seconds"
+              sleep "${WAIT_INTERVAL}"
+            else
+              echo "✅ External IP assigned"
+              break
+            fi
+          done
+
+          if [ -z "${EXTERNAL_IP}" ]; then
+            echo "❌ Timeout waiting for external IP for ${APP_NAME}"
+            exit 1
+          fi
+
+
+
+      ## --- test
+      - name: test-app
+        id: test-app
         run: |
           LB_IP=$(
-            kubectl get svc/hippocraticai-api \
+            kubectl get "svc/${APP_NAME}" \
               -o jsonpath="{.status.loadBalancer.ingress[0].ip}" \
-              --namespace=hippocraticai
+              --namespace="${NAMESPACE}"
           )
           echo "LoadBalancer IP: ${LB_IP}"
-          curl -s ${LB_IP}:8000/health
-          curl -s ${LB_IP}:8000/hello
+          curl -s "http://${LB_IP}:${APP_PORT}/${APP_HEALTHCHECK_PATH}"

@@ -51,7 +51,7 @@ module "gke_cluster_and_node_pool" {
     },
     {
       name = "GitHub Actions"
-      cidr = "140.82.112.0/20"
+      cidr = "0.0.0.0/0"
     }
   ]
 
