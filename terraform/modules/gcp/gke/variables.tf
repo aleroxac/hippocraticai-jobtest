@@ -146,3 +146,44 @@ variable "maintenance_recurrence" {
   type        = string
   default     = "FREQ=WEEKLY;BYDAY=SU,WE"
 }
+
+
+
+variable "enable_private_cluster" {
+  description = "Whether to enable a private (internal) cluster"
+  type        = bool
+  default     = true
+}
+
+variable "enable_private_endpoint" {
+  description = "Whether to expose the master endpoint internally only"
+  type        = bool
+  default     = false
+}
+
+variable "master_ipv4_cidr_block" {
+  description = "CIDR block for GKE master in private clusters"
+  type        = string
+  default     = "172.16.0.0/28"
+}
+
+variable "pods_range_name" {
+  description = "Secondary IP range name for pods"
+  type        = string
+  default     = null
+}
+
+variable "services_range_name" {
+  description = "Secondary IP range name for services"
+  type        = string
+  default     = null
+}
+
+variable "authorized_cidr_blocks" {
+  description = "List of CIDRs allowed to connect to GKE master (used for private clusters)"
+  type = list(object({
+    name = string
+    cidr = string
+  }))
+  default = []
+}

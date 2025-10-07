@@ -1,5 +1,7 @@
 
 resource "google_container_node_pool" "default" {
+  provider = google
+
   name       = "${var.cluster_name}-np1"
   cluster    = google_container_cluster.this.name
   location   = var.location

@@ -6,6 +6,11 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 7.5.0"
     }
+
+    google-beta = {
+      source  = "hashicorp/google-beta"
+      version = "~> 7.5.0"
+    }
   }
 
   backend "gcs" {
@@ -16,5 +21,10 @@ terraform {
 
 provider "google" {
   project = "aleroxac"
-  region  = "us-east1"
+  region  = var.region
+}
+
+provider "google-beta" {
+  project = var.project_id
+  region  = var.region
 }
