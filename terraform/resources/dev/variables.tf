@@ -14,3 +14,8 @@ variable "environment" {
   type        = string
   default     = "dev"
 }
+
+variable "github_repositories" {
+  description = "GitHub autorized repositories (format: owner/repo)"
+  type        = list(string)
+}

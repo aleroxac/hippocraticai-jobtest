@@ -6,6 +6,7 @@ on:
 permissions:
   contents: write
   actions: write
+  id-token: write
 
 jobs:
   ci:
@@ -44,11 +45,18 @@ jobs:
 
 
       ## --- build
+      # - name: gcp-auth
+      #   id: gcp-auth
+      #   uses: google-github-actions/auth@v2
+      #   with:
+      #     credentials_json: ${{ secrets.GCP_SA_KEY }}
+
       - name: gcp-auth
         id: gcp-auth
-        uses: google-github-actions/auth@v2
+        uses: 'google-github-actions/auth@v2'
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          workload_identity_provider: 'projects/aleroxac/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+          service_account: 'github-actions@aleroxac.iam.gserviceaccount.com'
 
       - name: configure-docker-auth
         id: configure-docker-auth
